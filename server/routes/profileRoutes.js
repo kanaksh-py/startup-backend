@@ -1,15 +1,17 @@
 import express from 'express';
 import { getPublicProfile, searchProfiles, updateProfile } from '../controllers/profileController.js';
-import authMiddleware from '../middleware/auth.js';
+import authMiddleware, { publicAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// 1. UPDATE: Removed authMiddleware from the public profile route
-// This allows anyone with the link to view the profile
-router.get('/:id', getPublicProfile); 
+// 1. Specific routes MUST come first
+// Changed to publicAuth so guests can use the search page too
+router.get('/search', publicAuth, searchProfiles);
 
-// 2. Keep these protected
+// 2. Dynamic ID routes MUST come after specific routes
+router.get('/:id', publicAuth, getPublicProfile); 
+
+// 3. Protected actions
 router.put('/update', authMiddleware, updateProfile);
-router.get('/search', authMiddleware, searchProfiles);
 
 export default router;
