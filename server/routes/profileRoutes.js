@@ -4,14 +4,11 @@ import authMiddleware, { publicAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// 1. Specific routes MUST come first
-// Changed to publicAuth so guests can use the search page too
+// 1. ALL specific paths MUST be at the top
+router.put('/update', authMiddleware, updateProfile); // Put this first
 router.get('/search', publicAuth, searchProfiles);
 
-// 2. Dynamic ID routes MUST come after specific routes
+// 2. The dynamic ID route MUST be last
 router.get('/:id', publicAuth, getPublicProfile); 
-
-// 3. Protected actions
-router.put('/update', authMiddleware, updateProfile);
 
 export default router;

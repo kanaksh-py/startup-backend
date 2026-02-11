@@ -1,66 +1,66 @@
 import Post from '../model/Post.js';
 import User from '../model/UserModel.js';
+import Startup from '../model/StartupModel.js';
 import cloudinary from '../config/cloudinary.js';
 
 const createPost = async (req, res) => {
     try {
         const { content, image } = req.body;
         
-        // 1. Find the User and their specific Startup Profile
+        // 1. Find User and Profile
         const user = await User.findById(req.startupId).populate('startupProfile');
 
-        if (!user || user.role !== 'startup') {
-            return res.status(403).json({ message: "Only startups can create posts." });
+        if (!user || user.role !== 'startup' || !user.startupProfile) {
+            return res.status(403).json({ message: "Valid startup profile required to post." });
         }
 
-        if (!user.startupProfile) {
-            return res.status(404).json({ message: "Startup profile not found." });
-        }
+        const profile = user.startupProfile;
 
-        // --- NEW: 7-DAY LIMIT LOGIC ---
-        const lastPost = user.startupProfile.lastPostDate;
-        if (lastPost) {
+        // 2. 7-DAY LIMIT LOGIC (Fixed & Accurate)
+        if (profile.lastPostDate) {
             const now = new Date();
+            const lastPost = new Date(profile.lastPostDate);
             const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
-            const timeSinceLastPost = now - new Date(lastPost);
+            const diff = now.getTime() - lastPost.getTime();
 
-            if (timeSinceLastPost < oneWeekInMs) {
-                const msRemaining = oneWeekInMs - timeSinceLastPost;
-                const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
-                const hoursRemaining = Math.ceil(msRemaining / (1000 * 60 * 60));
-
+            if (diff < oneWeekInMs) {
+                const timeLeft = oneWeekInMs - diff;
+                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                
+                let timeMsg = days > 0 ? `${days} day(s)` : `${hours} hour(s)`;
+                
                 return res.status(429).json({ 
-                    message: `You can only post once a week. Please wait ${daysRemaining} more day(s) (approx ${hoursRemaining} hours).` 
+                    success: false,
+                    message: `Weekly limit reached. You can post again in ${timeMsg}.` 
                 });
             }
         }
-        // ------------------------------
 
-        // 2. Upload image to Cloudinary if exists
+        // 3. Upload image
         let imageUrl = '';
         if (image) {
-            const uploadRes = await cloudinary.uploader.upload(image, {
-                folder: 'startup_posts'
-            });
+            const uploadRes = await cloudinary.uploader.upload(image, { folder: 'startup_posts' });
             imageUrl = uploadRes.secure_url;
         }
 
-        // 3. Create the post using the Startup Profile ID
+        // 4. Save the Post
         const newPost = new Post({
-            startup: user.startupProfile._id, 
+            startup: profile._id, 
             content,
             image: imageUrl
         });
-
         await newPost.save();
 
-        // 4. Update the Startup Profile's last post date
-        user.startupProfile.lastPostDate = new Date();
-        await user.startupProfile.save();
+        // 5. UPDATE PROFILE (Resets the timer)
+        profile.lastPostDate = new Date();
+        profile.operating_status = 'active'; 
+        await profile.save();
 
-        res.status(201).json({ success: true, data: newPost });
+        return res.status(201).json({ success: true, data: newPost });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        console.error("POST ERROR:", err);
+        return res.status(500).json({ success: false, error: err.message });
     }
 };
 
