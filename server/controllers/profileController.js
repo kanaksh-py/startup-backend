@@ -1,4 +1,5 @@
 // server/controllers/profileController.js
+import mongoose from 'mongoose';
 import Startup from '../model/StartupModel.js';
 import Incubator from '../model/IncubatorModel.js';
 import Post from '../model/Post.js';
@@ -10,23 +11,31 @@ import cloudinary from '../config/cloudinary.js';
  */
 export const getPublicProfile = async (req, res) => {
     try {
-        const { id } = req.params; // 'id' in the URL is the slug string
+        const { id } = req.params; 
+        console.log("Backend receiving ID/Slug:", id); // ADD THIS LOG
 
-        let profile = await Startup.findOne({ slug: id });
+        // Check if ID is a valid 24-char hex string
+        const isObjectId = mongoose.Types.ObjectId.isValid(id);
+        const query = isObjectId ? { _id: id } : { slug: id };
+
+        let profile = await Startup.findOne(query);
         let role = 'startup';
 
         if (!profile) {
-            profile = await Incubator.findOne({ slug: id });
+            profile = await Incubator.findOne(query);
             role = 'incubator';
         }
 
-        if (!profile) return res.status(404).json({ message: "Profile not found" });
+        if (!profile) {
+            console.log("No profile found for query:", query); // ADD THIS LOG
+            return res.status(404).json({ message: "Profile not found" });
+        }
 
-        // Only startups have a feed of posts
         const posts = role === 'startup' ? await Post.find({ startup: profile._id }).sort({ createdAt: -1 }) : [];
 
         res.json({ profile, role, posts });
     } catch (err) {
+        console.error("Backend Error:", err.message);
         res.status(500).json({ error: err.message });
     }
 };
@@ -94,13 +103,11 @@ export const updateProfile = async (req, res) => {
                 'niche', 'problem_statement', 'target_market', 'customer_segment', 'product_stage',
                 'business_model', 'revenue_model', 'ip_status', 'funding_stage', 'total_funding_amount',
                 'monthly_revenue_range', 'number_of_customers', 'growth_metrics', 'team_size', 
-                'hiring', 'contact_phone', 'contact_email', 'visibility' // ADDED contact_email
+                'hiring', 'contact_phone', 'contact_email', 'visibility'
             ];
 
             fields.forEach(f => {
-                if (d[f] !== undefined) {
-                    updateFields[f] = d[f];
-                }
+                if (d[f] !== undefined) updateFields[f] = d[f];
             });
 
             // Map Nested Location
@@ -109,15 +116,13 @@ export const updateProfile = async (req, res) => {
             if (d.country !== undefined) updateFields['location.country'] = d.country;
             if (d.remote_friendly !== undefined) updateFields['location.remote_friendly'] = d.remote_friendly === true || d.remote_friendly === 'true';
 
-            // Map Nested Needs
-            if (d.seeking_incubation !== undefined) updateFields['needs.seeking_incubation'] = d.seeking_incubation === true || d.seeking_incubation === 'true';
-            if (d.seeking_funding !== undefined) updateFields['needs.seeking_funding'] = d.seeking_funding === true || d.seeking_funding === 'true';
-            if (d.seeking_partners !== undefined) updateFields['needs.seeking_partners'] = d.seeking_partners === true || d.seeking_partners === 'true';
-            if (d.seeking_mentors !== undefined) updateFields['needs.seeking_mentors'] = d.seeking_mentors === true || d.seeking_mentors === 'true';
-
-            // Map Nested Socials
+            // --- UPDATED SOCIALS MAPPING (STARTUP) ---
             if (d.linkedin_url !== undefined) updateFields['socials.linkedin_url'] = d.linkedin_url;
             if (d.twitter_url !== undefined) updateFields['socials.twitter_url'] = d.twitter_url;
+            if (d.instagram_url !== undefined) updateFields['socials.instagram_url'] = d.instagram_url;
+            if (d.github_url !== undefined) updateFields['socials.github_url'] = d.github_url;
+            if (d.discord_invite !== undefined) updateFields['socials.discord_invite'] = d.discord_invite;
+            if (d.medium_url !== undefined) updateFields['socials.medium_url'] = d.medium_url;
             if (d.pitch_deck_url !== undefined) updateFields['socials.pitch_deck_url'] = d.pitch_deck_url;
 
         } else {
@@ -131,9 +136,14 @@ export const updateProfile = async (req, res) => {
             if (d.country !== undefined) updateFields['location.country'] = d.country;
             if (d.equity_taken_percentage !== undefined) updateFields['programDetails.equity_taken_percentage'] = d.equity_taken_percentage;
             
-            if (d.office_space !== undefined) updateFields['services.office_space'] = d.office_space === true || d.office_space === 'true';
-            if (d.mentorship_offered !== undefined) updateFields['services.mentorship_offered'] = d.mentorship_offered === true || d.mentorship_offered === 'true';
+            // --- UPDATED SOCIALS MAPPING (INCUBATOR) ---
             if (d.linkedin_url !== undefined) updateFields['socials.linkedin_url'] = d.linkedin_url;
+            if (d.twitter_url !== undefined) updateFields['socials.twitter_url'] = d.twitter_url;
+            if (d.instagram_url !== undefined) updateFields['socials.instagram_url'] = d.instagram_url;
+            if (d.github_url !== undefined) updateFields['socials.github_url'] = d.github_url;
+            if (d.discord_invite !== undefined) updateFields['socials.discord_invite'] = d.discord_invite;
+            if (d.medium_url !== undefined) updateFields['socials.medium_url'] = d.medium_url;
+            if (d.pitch_deck_url !== undefined) updateFields['socials.pitch_deck_url'] = d.pitch_deck_url;
         }
 
         const Model = req.role === 'startup' ? Startup : Incubator;

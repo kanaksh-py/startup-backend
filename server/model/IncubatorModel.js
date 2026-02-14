@@ -2,8 +2,8 @@ import mongoose from 'mongoose';
 
 const IncubatorSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    name: { type: String, required: true, unique: true, trim: true }, // Added Unique
-    slug: { type: String, unique: true, lowercase: true, trim: true }, // Added Slug
+    name: { type: String, required: true, unique: true, trim: true }, 
+    slug: { type: String, unique: true, lowercase: true, trim: true }, 
     description: String,
     logo_url: String,
     website_url: String,
@@ -15,8 +15,10 @@ const IncubatorSchema = new mongoose.Schema({
     operating_status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     
     location: {
+        address_line: String,
         city: String,
         state: String,
+        pincode: String,
         country: String,
         coverage_area: { type: String, enum: ['local', 'national', 'global'] },
         remote_program_available: { type: Boolean, default: false }
@@ -62,9 +64,15 @@ const IncubatorSchema = new mongoose.Schema({
         total_follow_on_funding: String
     },
 
+    // --- UPDATED SOCIALS ---
     socials: {
         linkedin_url: String,
         twitter_url: String,
+        instagram_url: String,
+        medium_url: String,
+        github_url: String,
+        discord_invite: String,
+        pitch_deck_url: String,
         contact_email: String,
         contact_phone: String
     },
@@ -73,15 +81,14 @@ const IncubatorSchema = new mongoose.Schema({
     last_active: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// Auto-generate slug before saving
-IncubatorSchema.pre('save', function(next) {
+IncubatorSchema.pre('save', async function() {
     if (this.isModified('name')) {
         this.slug = this.name
             .toLowerCase()
-            .replace(/[^\w ]+/g, '')
-            .replace(/ +/g, '-');
+            .trim()
+            .replace(/[^\w ]+/g, '') // Remove special characters
+            .replace(/ +/g, '-');    // Replace spaces with dashes
     }
-    next();
 });
 
 export default mongoose.model('Incubator', IncubatorSchema);

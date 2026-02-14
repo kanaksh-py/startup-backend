@@ -1,20 +1,22 @@
+// server/controllers/feedController.js
 import Post from '../model/Post.js';
+// MUST IMPORT THESE TO REGISTER SCHEMAS FOR POPULATION
+import Startup from '../model/StartupModel.js';
+import Incubator from '../model/IncubatorModel.js';
 
 const getGlobalFeed = async (req, res) => {
     try {
-        // Ensure the path 'startup' matches the field name in your Post Schema
         const posts = await Post.find()
             .populate({
-                path: 'startup', 
-                select: 'name logo_url website_url' 
+                path: 'author', 
+                // Fetches the actual data from either Startup or Incubator collection
+                select: 'name logo_url slug' 
             })
             .sort({ createdAt: -1 });
 
-        res.status(200).json({
-            success: true,
-            data: posts
-        });
+        res.status(200).json({ success: true, data: posts });
     } catch (err) {
+        console.error("Feed Populate Error:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 };

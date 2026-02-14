@@ -5,19 +5,14 @@ import cloudinary from '../config/cloudinary.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-// server/controllers/authController.js
-
-// ... (keep imports)
-
 export const register = async (req, res) => {
     try {
         const { email, password, role, name, logo, ...profileData } = req.body;
 
-        // 1. PRE-CHECK: Ensure Email is unique
+        // 1. Unique Checks
         let existingUser = await User.findOne({ email });
         if (existingUser) return res.status(400).json({ message: "Email already in use" });
 
-        // 2. PRE-CHECK: Ensure Name is unique across both collections to prevent duplicate search hits
         const [existingStartup, existingIncubator] = await Promise.all([
             Startup.findOne({ name }),
             Incubator.findOne({ name })
@@ -26,10 +21,15 @@ export const register = async (req, res) => {
             return res.status(400).json({ message: "Entity name already taken." });
         }
 
+        // 2. Logo Upload
         let logoUrl = '';
         if (logo) {
-            const uploadRes = await cloudinary.uploader.upload(logo, { folder: 'logos' });
-            logoUrl = uploadRes.secure_url;
+            try {
+                const uploadRes = await cloudinary.uploader.upload(logo, { folder: 'logos' });
+                logoUrl = uploadRes.secure_url;
+            } catch (cloudErr) {
+                console.error("Cloudinary Upload Failed:", cloudErr);
+            }
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -44,85 +44,77 @@ export const register = async (req, res) => {
                 tagline: profileData.tagline,
                 detailed_description: profileData.detailed_description,
                 website_url: profileData.website_url,
-                founded_year: profileData.founded_year,
-                legal_entity_name: profileData.legal_entity_name,
-                company_registration_number: profileData.company_registration_number,
-                status: profileData.status || 'idea',
                 location: {
-                    city: profileData.city,
-                    state: profileData.state,
-                    country: profileData.country,
-                    remote_friendly: profileData.remote_friendly === true
+                    address_line: profileData.location?.address_line,
+                    city: profileData.location?.city,
+                    state: profileData.location?.state,
+                    pincode: profileData.location?.pincode,
+                    country: profileData.location?.country || 'India',
                 },
-                industry: {
-                    primary: profileData.primary_industry,
-                    niche: profileData.niche,
-                    problem_statement: profileData.problem_statement,
-                    target_market: profileData.target_market || 'B2B',
-                    customer_segment: profileData.customer_segment
-                },
-                product: {
-                    stage: profileData.product_stage,
-                    business_model: profileData.business_model,
-                    revenue_model: profileData.revenue_model,
-                    ip_status: profileData.ip_status
-                },
-                funding: {
-                    stage: profileData.funding_stage,
-                    total_amount: profileData.total_funding_amount,
-                    key_investors: profileData.key_investors
-                },
-                team: { size: profileData.team_size, hiring: profileData.hiring === true },
-                needs: {
-                    seeking_incubation: profileData.seeking_incubation === true,
-                    seeking_funding: profileData.seeking_funding === true,
-                    seeking_partners: profileData.seeking_partners === true,
-                    seeking_mentors: profileData.seeking_mentors === true
-                },
-                socials: { 
-                    linkedin_url: profileData.linkedin_url,
-                    twitter_url: profileData.twitter_url,
-                    pitch_deck_url: profileData.pitch_deck_url
-                }
+                industry: profileData.industry,
+                product: profileData.product,
+                funding: profileData.funding,
+                team: profileData.team,
+                socials: profileData.socials
             });
         } else {
+            // FIX: Explicit mapping for Incubator to avoid Enum/Validation errors
             profile = new Incubator({
                 user: user._id,
                 name,
                 logo_url: logoUrl,
-                description: profileData.detailed_description,
-                website_url: profileData.website_url,
-                contact_email: profileData.contact_email,
-                contact_phone: profileData.contact_phone,
-                location: { city: profileData.city, country: profileData.country },
+                description: req.body.description || "",
+                website_url: profileData.website_url || "",
+                organization_type: profileData.organization_type || 'incubator',
+                location: { 
+                    address_line: profileData.location?.address_line || "",
+                    city: profileData.location?.city || "", 
+                    state: profileData.location?.state || "",
+                    pincode: profileData.location?.pincode || "",
+                    country: profileData.location?.country || 'India',
+                    coverage_area: profileData.coverage_area || 'local' 
+                },
                 programDetails: { 
-                    program_name: profileData.program_name,
-                    equity_taken_percentage: profileData.equity_taken_percentage,
-                    program_format: profileData.program_format
+                    program_name: profileData.programDetails?.program_name || name,
+                    equity_taken_percentage: Number(profileData.programDetails?.equity_taken_percentage) || 0,
+                    program_format: profileData.programDetails?.program_format || 'hybrid'
+                },
+                trackRecord: {
+                    number_of_startups_supported: Number(profileData.trackRecord?.number_of_startups_supported) || 0
+                },
+                socials: {
+                    contact_email: profileData.contact_email || email,
+                    contact_phone: profileData.contact_phone || ""
                 }
             });
         }
 
-        // Save Profile First
+        // 3. Sequential Save
         await profile.save();
 
-        // Link Profile to User and Save User
         if (role === 'startup') user.startupProfile = profile._id;
         else user.incubatorProfile = profile._id;
         await user.save();
 
         const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+        
         return res.status(201).json({
             token,
-            user: { id: user._id, role: user.role, profileId: profile.slug, name: profile.name, logo: profile.logo_url }
+            user: { 
+                id: user._id, 
+                role: user.role, 
+                profileSlug: profile.slug, 
+                profileId: profile._id, 
+                name: profile.name, 
+                logo: profile.logo_url 
+            }
         });
     } catch (err) {
+        console.error("FATAL REGISTRATION ERROR:", err); // Check terminal for this
         if (err.code === 11000) return res.status(400).json({ message: "Duplicate record detected." });
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Sync Protocol Failure", error: err.message });
     }
 };
-
-// server/controllers/authController.js
 
 export const login = async (req, res) => {
     try {
@@ -141,8 +133,8 @@ export const login = async (req, res) => {
             user: { 
                 id: user._id, 
                 role: user.role, 
-                profileSlug: profile.slug, // For URL/Navigation
-                profileId: profile._id,   // FOR CHAT LOGIC (ObjectID)
+                profileSlug: profile.slug, 
+                profileId: profile._id,   
                 name: profile.name, 
                 logo: profile.logo_url 
             }
@@ -154,10 +146,10 @@ export const login = async (req, res) => {
 
 export const getStatus = async (req, res) => {
     try {
-        const user = await User.findById(req.startupId).populate('startupProfile incubatorProfile');
+        const user = await User.findById(req.userId || req.startupId).populate('startupProfile incubatorProfile');
         if (!user) return res.status(404).json({ message: "User not found" });
         const profile = user.role === 'startup' ? user.startupProfile : user.incubatorProfile;
-        return res.json({ role: user.role, profileId: profile.slug, name: profile.name, status: profile.operating_status });
+        return res.json({ role: user.role, profileId: profile._id, profileSlug: profile.slug, name: profile.name, status: profile.operating_status });
     } catch (err) {
         return res.status(500).json({ error: err.message });
     }

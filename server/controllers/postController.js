@@ -1,58 +1,49 @@
+// server/controllers/postController.js
 import Post from '../model/Post.js';
 import User from '../model/UserModel.js';
 import Startup from '../model/StartupModel.js';
+import Incubator from '../model/IncubatorModel.js';
 import cloudinary from '../config/cloudinary.js';
 
-const createPost = async (req, res) => {
+export const createPost = async (req, res) => {
     try {
         const { content, image } = req.body;
         
-        // 1. Find User and Profile
-        const user = await User.findById(req.startupId).populate('startupProfile');
+        // Use req.userId (from authMiddleware) to find the person posting
+        const user = await User.findById(req.userId).populate('startupProfile incubatorProfile');
+        if (!user) return res.status(404).json({ message: "Identity sync failed." });
 
-        if (!user || user.role !== 'startup' || !user.startupProfile) {
-            return res.status(403).json({ message: "Valid startup profile required to post." });
+        const isStartup = user.role === 'startup';
+        const profile = isStartup ? user.startupProfile : user.incubatorProfile;
+
+        if (!profile) {
+            return res.status(403).json({ message: "Active profile required to broadcast." });
         }
 
-        const profile = user.startupProfile;
-
-        // 2. 7-DAY LIMIT LOGIC (Fixed & Accurate)
+        // 7-DAY LIMIT LOGIC
         if (profile.lastPostDate) {
-            const now = new Date();
-            const lastPost = new Date(profile.lastPostDate);
             const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
-            const diff = now.getTime() - lastPost.getTime();
-
+            const diff = Date.now() - new Date(profile.lastPostDate).getTime();
             if (diff < oneWeekInMs) {
-                const timeLeft = oneWeekInMs - diff;
-                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                
-                let timeMsg = days > 0 ? `${days} day(s)` : `${hours} hour(s)`;
-                
-                return res.status(429).json({ 
-                    success: false,
-                    message: `Weekly limit reached. You can post again in ${timeMsg}.` 
-                });
+                return res.status(429).json({ message: "Cooldown active. One transmission per week." });
             }
         }
 
-        // 3. Upload image
         let imageUrl = '';
         if (image) {
-            const uploadRes = await cloudinary.uploader.upload(image, { folder: 'startup_posts' });
+            const uploadRes = await cloudinary.uploader.upload(image, { folder: 'ecosystem_posts' });
             imageUrl = uploadRes.secure_url;
         }
 
-        // 4. Save the Post
         const newPost = new Post({
-            startup: profile._id, 
+            author: profile._id,
+            authorModel: isStartup ? 'Startup' : 'Incubator', // This MUST match the Model name
             content,
             image: imageUrl
         });
+        
         await newPost.save();
 
-        // 5. UPDATE PROFILE (Resets the timer)
         profile.lastPostDate = new Date();
         profile.operating_status = 'active'; 
         await profile.save();
@@ -64,4 +55,24 @@ const createPost = async (req, res) => {
     }
 };
 
-export default createPost;
+export const toggleUpvote = async (req, res) => {
+    try {
+        const post = await Post.findById(req.params.id);
+        if (!post) return res.status(404).json({ message: "Post not found." });
+
+        // Toggle logic using the User ObjectID
+        const userId = req.userId;
+        const index = post.upvotes.indexOf(userId);
+        
+        if (index === -1) {
+            post.upvotes.push(userId);
+        } else {
+            post.upvotes.splice(index, 1);
+        }
+
+        await post.save();
+        res.json({ success: true, upvotes: post.upvotes });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
